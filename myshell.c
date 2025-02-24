@@ -6,6 +6,7 @@
 #include <sys/types.h> // for pid_t
 
 // 1. handling shell Commands with No Arguments (ls, ps etc)
+// 2. this function can also be used to handle commands with arguments
 
 void noArgCommand( char *command[] ) {
     pid_t pid = fork();
@@ -30,6 +31,7 @@ int main(){
         while(command[i] != NULL){
             i++; // increment i to keep track of the number of arguments in the command 
             command[i] = strtok(NULL, " \n");
+            // doing so, we can handle commands with multiple arguments
         }
 
         if(strcmp(command[0], "exit") == 0){
