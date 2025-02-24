@@ -23,7 +23,7 @@ int main(){
     int i = 0; // this is used to keep track of the number of arguments in the command
 
     while(1){
-        printf("myshell> ");
+        printf("$ ");
         fgets(userInput, 100, stdin);
         command[i] = strtok(userInput, " \n");
 
