@@ -73,7 +73,6 @@ void handleRedirect(char *command[]) {
 }
 
 //4. handle input redirection
-//4. handle input redirection
 void inputRedirect(char *command[]){
     pid_t pid = fork();
     if (pid != 0){
@@ -108,6 +107,61 @@ void inputRedirect(char *command[]){
 }
 
 
+// 5. pipes to connect output of one command to input of another command
+void handlePipes(char *command[]) {
+    int fd[2];
+    pipe(fd); 
+
+    pid_t pid1 = fork();
+    if (pid1 == 0) {  
+        close(fd[0]); 
+        dup2(fd[1], STDOUT_FILENO); 
+        close(fd[1]);
+
+        char *cmd1[10]; 
+        int i = 0;
+        while (command[i] != NULL && strcmp(command[i], "|") != 0) {
+            cmd1[i] = command[i];
+            i++;
+        }
+        cmd1[i] = NULL; 
+
+        execvp(cmd1[0], cmd1);
+        perror("Exec failed");
+        exit(1);
+    }
+
+    pid_t pid2 = fork();
+    if (pid2 == 0) {  
+        close(fd[1]);  
+        dup2(fd[0], STDIN_FILENO); 
+        close(fd[0]);
+
+        char *cmd2[10]; // to get the second command (after |)
+        int i = 0, j = 0;
+        while (command[i] != NULL && strcmp(command[i], "|") != 0) {
+            i++;
+        }
+        i++;  
+        while (command[i] != NULL) {
+            cmd2[j++] = command[i++];
+        }
+        cmd2[j] = NULL; 
+
+        execvp(cmd2[0], cmd2);
+        perror("Exec failed");
+        exit(1);
+    }
+
+    //close both ends of the pipe in the parent
+    close(fd[0]);
+    close(fd[1]);
+    wait(NULL);
+    wait(NULL);
+}
+
+
+
 int main() {
     char userInput[100];
     char *command[10];
@@ -135,34 +189,40 @@ int main() {
         if (strcmp(command[0], "exit") == 0) {
             exit(0);
         } 
-        // output redirect check and then input redirect check
+        // Check for redirection and pipes
         else {
             int redirectFound = 0;
             int inputRedirectFound = 0;
+            int pipeFound = 0;
+
             for (int j = 0; j < i; j++) {
                 if (strcmp(command[j], ">") == 0 || strcmp(command[j], "2>") == 0 || strcmp(command[j], "2>&1") == 0) {
                     redirectFound = 1;
                     break;
                 }
-                else if(strcmp(command[j], "<") == 0){
+                else if (strcmp(command[j], "<") == 0) {
                     inputRedirectFound = 1;
+                    break;
+                }
+                else if (strcmp(command[j], "|") == 0) { 
+                    pipeFound = 1;
                     break;
                 }
             }
 
-
-            
-            if (redirectFound) {
+            if (pipeFound) {
+                handlePipes(command);
+            }
+            else if (redirectFound) {
                 handleRedirect(command);
             }
-            else if(inputRedirectFound){
+            else if (inputRedirectFound) {
                 inputRedirect(command);
-
             }
-          
             else {
                 noArgCommand(command);
             }
         }
     }
 }
+
