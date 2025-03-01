@@ -1,6 +1,4 @@
-total 96
--rw-r--r--  1 izah  staff      0 Feb 24 15:48 Makefile
--rw-r--r--@ 1 izah  staff     14 Feb 24 15:48 README.md
--rw-r--r--@ 1 izah  staff      0 Mar  1 01:33 file.txt
--rwxr-xr-x@ 1 izah  staff  34388 Mar  1 01:33 myshell
--rw-r--r--@ 1 izah  staff   7145 Mar  1 01:32 myshell.c
+hello
+bye
+okay
+hello
