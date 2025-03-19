@@ -9,6 +9,14 @@
 #include "parser.h"   // Include the parser for input parsing
 #include "executor.h" // Include the executor for command execution
 
+//client 
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <netinet/in.h>
+
+//define port
+#define PORT 8080
+
 int main() {
     char userInput[100];
     char *command[50]; 
