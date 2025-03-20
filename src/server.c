@@ -6,8 +6,9 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include "executor.h"  
-#include "parser.h"    
+#include <sys/wait.h>
+#include "executor.h"
+#include "parser.h"
 
 #define PORT 8080
 #define BUFFER_SIZE 1024
@@ -17,44 +18,42 @@ int main() {
     struct sockaddr_in server_address;
     int opt = 1;
     char clientCommand[BUFFER_SIZE];
-    char *parsedCommand[50]; 
+    char *parsedCommand[50];
     int argCount;
 
-    
+    // Create the server socket
     server_socket = socket(AF_INET, SOCK_STREAM, 0);
-
-    //check for fail error
     if (server_socket == -1) {
         perror("[ERROR] Socket creation failed");
         exit(1);
     }
 
-    // enable reuse of address and port
+    // Allow address reuse
     if (setsockopt(server_socket, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt))) {
         perror("[ERROR] setsockopt failed");
         exit(1);
     }
 
-    // Define server address
+    // Configure server address
     memset(&server_address, 0, sizeof(server_address));
     server_address.sin_family = AF_INET;
     server_address.sin_port = htons(PORT);
     server_address.sin_addr.s_addr = INADDR_ANY;
 
-    // Bind socket
+    // Bind the socket
     if (bind(server_socket, (struct sockaddr*)&server_address, sizeof(server_address)) < 0) {
         perror("[ERROR] Socket bind failed");
         exit(EXIT_FAILURE);
     }
 
-    //Listen for client connections
+    // Listen for client connections
     if (listen(server_socket, 5) < 0) {
         perror("[ERROR] Socket listen failed");
         exit(EXIT_FAILURE);
     }
     printf("[INFO] Server started, waiting for client connections...\n");
 
-    //Accept client connection
+    // Accept client connection
     int addrlen = sizeof(server_address);
     client_socket = accept(server_socket, (struct sockaddr*)&server_address, (socklen_t*)&addrlen);
     if (client_socket < 0) {
@@ -63,7 +62,7 @@ int main() {
     }
     printf("[INFO] Client connected.\n");
 
-    // Read commands from client
+    // **Main loop to handle client commands**
     while (1) {
         memset(clientCommand, 0, sizeof(clientCommand));
         int bytesReceived = recv(client_socket, clientCommand, sizeof(clientCommand), 0);
@@ -73,10 +72,10 @@ int main() {
             break;
         }
 
-        // Print received command
-        printf("[RECEIVED] Received command: \"%s\" from client.\n", clientCommand);
+        // Print received command for debugging
+        printf("[RECEIVED] Command: \"%s\" from client.\n", clientCommand);
 
-        // Exit server when client sends "exit"
+        // Handle exit command
         if (strcmp(clientCommand, "exit") == 0) {
             printf("[INFO] Closing connection.\n");
             break;
@@ -85,50 +84,97 @@ int main() {
         // Parse the command
         parseInput(clientCommand, parsedCommand, &argCount);
 
-        // Prevent segmentation fault if user just presses enter!
+        // If user just pressed Enter, continue loop
         if (parsedCommand[0] == NULL) {
             continue;
         }
 
-        // Execute command & capture output
+        // **Determine command type (pipes, redirections, etc.)**
+        int pipeFound = 0, redirectFound = 0;
+        int inputRedirectFound = 0, outputRedirectFound = 0, errorRedirectFound = 0;
+
+        for (int j = 0; j < argCount; j++) {
+            if (strcmp(parsedCommand[j], "|") == 0) {
+                pipeFound = 1;
+            }
+            if (strcmp(parsedCommand[j], "<") == 0) {
+                redirectFound = 1;
+                inputRedirectFound = 1;
+            }
+            if (strcmp(parsedCommand[j], ">") == 0) {
+                redirectFound = 1;
+                outputRedirectFound = 1;
+            }
+            if (strcmp(parsedCommand[j], "2>") == 0 || strcmp(parsedCommand[j], "2>&1") == 0) {
+                redirectFound = 1;
+                errorRedirectFound = 1;
+            }
+        }
+
+        // **Create a pipe to capture command output**
         int pipefd[2];
         if (pipe(pipefd) == -1) {
-            perror("[ERROR] Pipe failed");
+            perror("[ERROR] Pipe creation failed");
             continue;
         }
 
         printf("[EXECUTING] Executing command: \"%s\"\n", clientCommand);
 
         pid_t pid = fork();
-        if (pid == 0) {  // Child process
+        if (pid == 0) {  // **Child process**
             close(pipefd[0]);  // Close read end
-            dup2(pipefd[1], STDOUT_FILENO);  
-            dup2(pipefd[1], STDERR_FILENO);  
+            dup2(pipefd[1], STDOUT_FILENO);  // Redirect stdout to pipe
+            dup2(pipefd[1], STDERR_FILENO);  // Redirect stderr to pipe
             close(pipefd[1]);
 
-            // Execute command using the executor functions
-            if (argCount > 1 && strcmp(parsedCommand[1], ">") == 0) {
-                handleRedirect(parsedCommand);
-            } else if (argCount > 1 && strcmp(parsedCommand[1], "<") == 0) {
-                inputRedirect(parsedCommand);
-            } else if (argCount > 1 && strcmp(parsedCommand[1], "|") == 0) {
-                handlePipes(parsedCommand);
-            } else {
+            // **Select the appropriate handler based on command type**
+            if (pipeFound && redirectFound) {
+                handlePipeRedirect(parsedCommand);
+            }
+            else if (pipeFound) {
+                int pipeCount = 0;
+                for (int j = 0; j < argCount; j++) {
+                    if (strcmp(parsedCommand[j], "|") == 0) {
+                        pipeCount++;
+                    }
+                }
+                
+                if (pipeCount > 1) {
+                    handleMultiplePipes(parsedCommand);
+                }
+                else {
+                    handlePipes(parsedCommand);
+                }
+            }
+            else if (redirectFound) {
+                if ((inputRedirectFound && outputRedirectFound) || 
+                    (inputRedirectFound && errorRedirectFound) || 
+                    (outputRedirectFound && errorRedirectFound)) {
+                    handleCombinedRedirect(parsedCommand);
+                }
+                else if (inputRedirectFound) {
+                    inputRedirect(parsedCommand);
+                }
+                else {
+                    handleRedirect(parsedCommand);
+                }
+            }
+            else {
                 noArgCommand(parsedCommand);
             }
 
             exit(0);
-        } else {  // parent process
-            close(pipefd[1]);  //close write end first
+        } else {  // **Parent process**
+            close(pipefd[1]);  // Close write end first
 
             char response[BUFFER_SIZE];
             memset(response, 0, BUFFER_SIZE);
 
-            // Read execution output from pipe
+            // **Read execution output from pipe**
             read(pipefd[0], response, BUFFER_SIZE - 1);
             close(pipefd[0]);
 
-            // Handle error cases
+            // **Handle empty output case**
             if (strlen(response) == 0) {
                 snprintf(response, BUFFER_SIZE, "[ERROR] Command not found: \"%s\"\n", clientCommand);
                 printf("[ERROR] Command not found: \"%s\"\n", clientCommand);
@@ -136,10 +182,10 @@ int main() {
                 printf("[OUTPUT] Sending output to client:\n%s", response);
             }
 
-            // Send response to client
+            // **Send response to client**
             send(client_socket, response, strlen(response), 0);
 
-            // Wait for child process to complete
+            // **Wait for child process to complete**
             wait(NULL);
         }
     }
