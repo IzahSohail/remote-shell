@@ -8,6 +8,7 @@
 #include <arpa/inet.h>
 
 #define PORT 8081
+#define BUFFER_SIZE 2048
 
 int main() {
     int sock;
@@ -58,8 +59,18 @@ int main() {
         }
 
         // Receive server response
-        memset(serverResponse, 0, sizeof(serverResponse));
-        ssize_t bytesReceived = recv(sock, serverResponse, sizeof(serverResponse) - 1, 0);
+       memset(serverResponse, 0, sizeof(serverResponse));
+       ssize_t bytesReceived;
+
+        while ((bytesReceived = recv(sock, serverResponse, sizeof(serverResponse) - 1, 0)) > 0) {
+            serverResponse[bytesReceived] = '\0';  // Ensure null termination
+            printf("%s", serverResponse);  // Print received chunk immediately
+
+            // If we received fewer bytes than buffer size, that means there's no more data
+            if (bytesReceived < sizeof(serverResponse) - 1) {
+                break;
+            }
+        }
 
         //Properly handle server disconnection
         if (bytesReceived == -1) {
@@ -71,14 +82,6 @@ int main() {
         }
 
         serverResponse[bytesReceived] = '\0';  // Ensure null termination
-
-        //If response is empty, just return to prompt
-        if (strlen(serverResponse) == 0 || strcmp(serverResponse, "\n") == 0) {
-            continue;  // Prevents infinite hang
-        }
-
-        // Print server response
-        printf("%s", serverResponse);
     }
 
     // Close socket before exiting

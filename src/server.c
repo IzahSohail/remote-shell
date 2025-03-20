@@ -164,36 +164,40 @@ int main() {
             }
 
             exit(0);
-        } 
-        else {  
-            close(pipefd[1]);  // Close write end
+        } else {  //Parent process
+            close(pipefd[1]);  // Close write end first
 
             char response[BUFFER_SIZE];
             memset(response, 0, BUFFER_SIZE);
 
-            // Read execution output from pipe
-            ssize_t bytesRead = read(pipefd[0], response, BUFFER_SIZE - 1);
-            close(pipefd[0]);  // Close read end
+            //Read execution output from pipe
+            read(pipefd[0], response, BUFFER_SIZE - 1);
+            close(pipefd[0]);
 
             int status;
-            waitpid(pid, &status, 0);  // Ensure child process is properly cleaned up
+            waitpid(pid, &status, 0);
 
-            // Ensure response is null-terminated
-            if (bytesRead > 0) {
-                response[bytesRead] = '\0';  // Terminate string correctly
-            } else {
-                response[0] = '\0';  // If no output, keep response empty
-            }
-
-            // **Ensure something is always sent to prevent client hang**
+            //Handle empty output case let say if we are reading from an empty file
             if (strlen(response) == 0) {
-                strcpy(response, "\n");  // Send a newline instead of empty string
+                //send empty response but ensure the code doesnt run into an infinite loop
+                strcpy(response, "\n");
+            }
+            // else handle the case where the command is incorrect
+            else if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
+                strcpy(response, "Command not found.\n");
+            }
+            //else handle case where the command is correct
+            else {
+                strcat(response, "\n");
             }
 
-            // Send response to client
-            send(client_socket, response, strlen(response), 0);
-        }
+            //print the output the server is sending to the client
+            printf("[OUTPUT] Sending response: \"%s\"\n", response);
 
+            //Send response to client
+            send(client_socket, response, strlen(response), 0);
+            wait(NULL);
+        }
     }
 
     // Close sockets
