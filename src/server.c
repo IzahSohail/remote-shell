@@ -10,8 +10,8 @@
 #include "executor.h"
 #include "parser.h"
 
-#define PORT 8080
-#define BUFFER_SIZE 1024
+#define PORT 8081
+#define BUFFER_SIZE 2048
 
 int main() {
     int server_socket, client_socket;
@@ -62,7 +62,7 @@ int main() {
     }
     printf("[INFO] Client connected.\n");
 
-    // **Main loop to handle client commands**
+    //Main loop to handle client commands
     while (1) {
         memset(clientCommand, 0, sizeof(clientCommand));
         int bytesReceived = recv(client_socket, clientCommand, sizeof(clientCommand), 0);
@@ -89,7 +89,7 @@ int main() {
             continue;
         }
 
-        // **Determine command type (pipes, redirections, etc.)**
+        //Determine command type (pipes, redirections, etc.)
         int pipeFound = 0, redirectFound = 0;
         int inputRedirectFound = 0, outputRedirectFound = 0, errorRedirectFound = 0;
 
@@ -111,7 +111,7 @@ int main() {
             }
         }
 
-        // **Create a pipe to capture command output**
+        //Create a pipe to capture command output
         int pipefd[2];
         if (pipe(pipefd) == -1) {
             perror("[ERROR] Pipe creation failed");
@@ -121,13 +121,13 @@ int main() {
         printf("[EXECUTING] Executing command: \"%s\"\n", clientCommand);
 
         pid_t pid = fork();
-        if (pid == 0) {  // **Child process**
-            close(pipefd[0]);  // Close read end
-            dup2(pipefd[1], STDOUT_FILENO);  // Redirect stdout to pipe
-            dup2(pipefd[1], STDERR_FILENO);  // Redirect stderr to pipe
+        if (pid == 0) {  //Child process
+            close(pipefd[0]);  
+            dup2(pipefd[1], STDOUT_FILENO);  
+            dup2(pipefd[1], STDERR_FILENO);  
             close(pipefd[1]);
 
-            // **Select the appropriate handler based on command type**
+            //Select the appropriate handler based on command type
             if (pipeFound && redirectFound) {
                 handlePipeRedirect(parsedCommand);
             }
@@ -164,30 +164,36 @@ int main() {
             }
 
             exit(0);
-        } else {  // **Parent process**
-            close(pipefd[1]);  // Close write end first
+        } 
+        else {  
+            close(pipefd[1]);  // Close write end
 
             char response[BUFFER_SIZE];
             memset(response, 0, BUFFER_SIZE);
 
-            // **Read execution output from pipe**
-            read(pipefd[0], response, BUFFER_SIZE - 1);
-            close(pipefd[0]);
+            // Read execution output from pipe
+            ssize_t bytesRead = read(pipefd[0], response, BUFFER_SIZE - 1);
+            close(pipefd[0]);  // Close read end
 
-            // **Handle empty output case**
-            if (strlen(response) == 0) {
-                snprintf(response, BUFFER_SIZE, "[ERROR] Command not found: \"%s\"\n", clientCommand);
-                printf("[ERROR] Command not found: \"%s\"\n", clientCommand);
+            int status;
+            waitpid(pid, &status, 0);  // Ensure child process is properly cleaned up
+
+            // Ensure response is null-terminated
+            if (bytesRead > 0) {
+                response[bytesRead] = '\0';  // Terminate string correctly
             } else {
-                printf("[OUTPUT] Sending output to client:\n%s", response);
+                response[0] = '\0';  // If no output, keep response empty
             }
 
-            // **Send response to client**
-            send(client_socket, response, strlen(response), 0);
+            // **Ensure something is always sent to prevent client hang**
+            if (strlen(response) == 0) {
+                strcpy(response, "\n");  // Send a newline instead of empty string
+            }
 
-            // **Wait for child process to complete**
-            wait(NULL);
+            // Send response to client
+            send(client_socket, response, strlen(response), 0);
         }
+
     }
 
     // Close sockets

@@ -7,7 +7,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-#define PORT 8080
+#define PORT 8081
 
 int main() {
     int sock;
@@ -26,7 +26,7 @@ int main() {
     serv_addr.sin_port = htons(PORT);
     inet_pton(AF_INET, "127.0.0.1", &serv_addr.sin_addr);  // localhost, can be modified to any IP address
 
-    //Connect to the server
+    // Connect to the server
     if (connect(sock, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) == -1) {
         perror("Connection to server failed");
         exit(1);
@@ -38,7 +38,12 @@ int main() {
         printf("$ ");
         fflush(stdout);
         fgets(userInput, sizeof(userInput), stdin);
-        userInput[strcspn(userInput, "\n")] = 0;  
+        userInput[strcspn(userInput, "\n")] = 0;  // Remove newline character
+
+        // Check if input is empty (just pressing "Enter")
+        if (strlen(userInput) == 0) {
+            continue;  // Skip sending empty commands
+        }
 
         // Send command to server
         if (send(sock, userInput, strlen(userInput), 0) == -1) {
@@ -54,16 +59,29 @@ int main() {
 
         // Receive server response
         memset(serverResponse, 0, sizeof(serverResponse));
-        if (recv(sock, serverResponse, sizeof(serverResponse), 0) == -1) {
+        ssize_t bytesReceived = recv(sock, serverResponse, sizeof(serverResponse) - 1, 0);
+
+        //Properly handle server disconnection
+        if (bytesReceived == -1) {
             perror("Receive failed");
+            break;
+        } else if (bytesReceived == 0) {
+            printf("[INFO] Server closed the connection.\n");
             break;
         }
 
-        //Print server response
+        serverResponse[bytesReceived] = '\0';  // Ensure null termination
+
+        //If response is empty, just return to prompt
+        if (strlen(serverResponse) == 0 || strcmp(serverResponse, "\n") == 0) {
+            continue;  // Prevents infinite hang
+        }
+
+        // Print server response
         printf("%s", serverResponse);
     }
 
-    //Close socket before exiting
+    // Close socket before exiting
     close(sock);
     return 0;
 }
