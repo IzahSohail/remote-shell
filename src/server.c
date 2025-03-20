@@ -188,11 +188,9 @@ int main() {
             }
             //else handle case where the command is correct
             else {
-                strcat(response, "\n");
+                printf("[OUTPUT] Sending response: \"%s\"\n", response);
             }
 
-            //print the output the server is sending to the client
-            printf("[OUTPUT] Sending response: \"%s\"\n", response);
 
             //Send response to client
             send(client_socket, response, strlen(response), 0);
