@@ -20,7 +20,8 @@ all: $(SERVER_TARGET) $(CLIENT_TARGET)
 
 # Build the server executable
 $(SERVER_TARGET): $(SERVER_OBJS)
-	$(CC) $(CFLAGS) $(SERVER_OBJS) -o $(SERVER_TARGET)
+	$(CC) $(CFLAGS) $(SERVER_OBJS) -o $(SERVER_TARGET) -lpthread    # 💡 Added -lpthread here
+
 
 # Build the client executable (myshell)
 $(CLIENT_TARGET): $(CLIENT_OBJS)
