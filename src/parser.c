@@ -4,17 +4,23 @@
 #include <ctype.h>
 #include "parser.h"
 
-void parseInput(char *userInput, char *command[], int *argCount) {
+void parseInput(char *userInput, char *command[], int *argCount)
+{
     *argCount = 0;
     int inQuote = 0;
     char *start = userInput;
 
-    while (*userInput) {
-        if (*userInput == '"') {
+    while (*userInput)
+    {
+        if (*userInput == '"')
+        {
             inQuote = !inQuote;
-        } else if (isspace(*userInput) && !inQuote) {
+        }
+        else if (isspace(*userInput) && !inQuote)
+        {
             *userInput = '\0';
-            if (*start) {
+            if (*start)
+            {
                 command[*argCount] = start;
                 (*argCount)++;
             }
@@ -23,14 +29,15 @@ void parseInput(char *userInput, char *command[], int *argCount) {
         userInput++;
     }
 
-    if (*start) {
+    if (*start)
+    {
         command[*argCount] = start;
         (*argCount)++;
     }
 
     command[*argCount] = NULL;
 
-    for (int i = 0; command[i] != NULL; i++) {
-        printf("Token[%d]: %s\n", i, command[i]);
-    }
+    // for (int i = 0; command[i] != NULL; i++) {
+    //     printf("Token[%d]: %s\n", i, command[i]);
+    // }
 }
