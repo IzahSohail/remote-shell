@@ -14,7 +14,7 @@
 #include <pthread.h>
 
 #define PORT 8081
-#define BUFFER_SIZE 2048
+#define BUFFER_SIZE 4096
 
 //since we will keep track of the thread numbers assigned to each client
 int client_counter = 0;

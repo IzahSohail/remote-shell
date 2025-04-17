@@ -8,12 +8,36 @@
 #include <arpa/inet.h>
 
 #define PORT 8081
-#define BUFFER_SIZE 2048
+#define BUFFER_SIZE 4096
+
+#define MAX_LINE 8192  // handle long input lines
+
+char* readFullLine() {
+    char *input = NULL;
+    size_t len = 0;
+    ssize_t read;
+
+    printf("$ ");
+    fflush(stdout);
+
+    read = getline(&input, &len, stdin);
+    if (read == -1) {
+        free(input);
+        return NULL;
+    }
+
+    // remove newline if present
+    if (input[read - 1] == '\n') {
+        input[read - 1] = '\0';
+    }
+
+    return input;
+}
 
 int main() {
     int sock;
     struct sockaddr_in serv_addr;
-    char userInput[100];
+    // char userInput[100];
     char serverResponse[1024];
 
     // Create socket
@@ -36,27 +60,27 @@ int main() {
     printf("Connected to server.\n");
 
     while (1) {
-        printf("$ ");
-        fflush(stdout);
-        fgets(userInput, sizeof(userInput), stdin);
-        userInput[strcspn(userInput, "\n")] = 0;  // Remove newline character
+        char *userInput = readFullLine();
+        if (!userInput) break;
 
-        // Check if input is empty (just pressing "Enter")
         if (strlen(userInput) == 0) {
-            continue;  // Skip sending empty commands
+            free(userInput);
+            continue;
         }
 
-        // Send command to server
         if (send(sock, userInput, strlen(userInput), 0) == -1) {
             perror("Send failed");
+            free(userInput);
             break;
         }
 
-        // Exit client when user types exit
         if (strcmp(userInput, "exit") == 0) {
             printf("Exiting client.\n");
+            free(userInput);
             break;
         }
+
+        free(userInput);
 
         // Receive server response
        memset(serverResponse, 0, sizeof(serverResponse));
