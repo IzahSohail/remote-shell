@@ -6,7 +6,7 @@ void handleRedirect(char *command[]);
 void inputRedirect(char *command[]);
 void handlePipes(char *command[]);
 void handleMultiplePipes(char *command[]);
-void handleCombinedRedirect(char *command[]);
 void handlePipeRedirect(char *command[]);
+void handleCombinedRedirect(char *command[]);
 
 #endif // EXECUTOR_H

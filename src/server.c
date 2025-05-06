@@ -43,11 +43,13 @@ void *handle_client(void *arg) {
            client_number, client_ip, client_port, client_number);
 
     char clientCommand[BUFFER_SIZE];
+    char commandCopy[BUFFER_SIZE];  // Add a copy for parsing
     char *parsedCommand[50];
     int argCount;
 
     while (1) {
         memset(clientCommand, 0, sizeof(clientCommand));
+        memset(commandCopy, 0, sizeof(commandCopy));
         int bytesReceived = recv(client_socket, clientCommand, sizeof(clientCommand), 0);
 
         if (bytesReceived <= 0) {
@@ -66,7 +68,10 @@ void *handle_client(void *arg) {
             break;
         }
 
-        parseInput(clientCommand, parsedCommand, &argCount);
+        // Make a copy before parsing since parseInput modifies the string
+        strncpy(commandCopy, clientCommand, sizeof(commandCopy) - 1);
+        parseInput(commandCopy, parsedCommand, &argCount);
+        
         if (parsedCommand[0] == NULL) continue;
 
         // Check if it's a demo task like "./demo 5"
@@ -82,7 +87,7 @@ void *handle_client(void *arg) {
             }
         }
 
-        // Otherwise it's a shell command
+        // Otherwise it's a shell command - use the original command string
         add_task_with_socket(clientCommand, client_number, -1, 1, client_socket);  // 1 = shell command
 
         printf("[EXECUTING] [Client #%d - %s:%d] Scheduled command: \"%s\"\n",

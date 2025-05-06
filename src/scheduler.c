@@ -6,7 +6,10 @@
 #include <signal.h>
 #include <sys/wait.h>
 #include <sys/socket.h>
+#include <errno.h>
 #include "scheduler.h"
+#include "parser.h"
+#include "executor.h"
 
 // these define our scheduling quantum (time slice) for each round
 #define FIRST_ROUND_QUANTUM 3   // first time a task runs, it gets 3 seconds
@@ -17,6 +20,9 @@
 Task* task_queue = NULL;        // our linked list of tasks starts empty
 pthread_mutex_t queue_mutex = PTHREAD_MUTEX_INITIALIZER;  // mutex to protect the queue
 int task_id_counter = 1;        // we start counting tasks from 1
+
+// Function declarations
+void execute_shell_command(Task* task);
 
 // this function adds a new task to our queue (basic version without socket)
 void add_task(const char* command, int client_id, int burst_time, int is_shell) {
@@ -173,48 +179,7 @@ void* scheduler_loop(void* arg) {
             }
         } else {
             // handle shell command execution
-            int pipefd[2];
-            if (pipe(pipefd) == -1) {
-                perror("pipe failed");
-                continue;
-            }
-
-            pid_t pid = fork();
-            if (pid == 0) {
-                // child process: set up pipes and execute command
-                close(pipefd[0]);
-                dup2(pipefd[1], STDOUT_FILENO);  // redirect stdout to pipe
-                dup2(pipefd[1], STDERR_FILENO);  // redirect stderr to pipe
-                close(pipefd[1]);
-                
-                // execute the shell command and capture output
-                char output_buffer[BUFFER_SIZE];
-                FILE *fp = popen(selected->command, "r");
-                if (fp == NULL) {
-                    fprintf(stderr, "Failed to run command\n");
-                    exit(1);
-                }
-                
-                while (fgets(output_buffer, sizeof(output_buffer), fp) != NULL) {
-                    printf("%s", output_buffer);
-                }
-                
-                pclose(fp);
-                exit(0);
-            } else if (pid > 0) {
-                // parent process: read command output and send to client
-                close(pipefd[1]);
-                
-                char buffer[BUFFER_SIZE];
-                ssize_t bytes;
-                while ((bytes = read(pipefd[0], buffer, sizeof(buffer) - 1)) > 0) {
-                    buffer[bytes] = '\0';
-                    send(selected->socket_fd, buffer, bytes, 0);
-                }
-                
-                close(pipefd[0]);
-                waitpid(pid, NULL, 0);          // wait for command to finish
-            }
+            execute_shell_command(selected);
         }
 
         pthread_mutex_lock(&queue_mutex);
@@ -249,6 +214,119 @@ void init_scheduler() {
 // cleanup function (not really used but good practice)
 void shutdown_scheduler() {
     // cleanup logic if needed
+}
+
+void execute_shell_command(Task* task) {
+    char* parsedCommand[50];
+    int argCount;
+    
+    // Parse the command
+    parseInput(task->command, parsedCommand, &argCount);
+    
+    if (parsedCommand[0] == NULL) {
+        send(task->socket_fd, "\n", 1, 0);
+        return;
+    }
+
+    int pipefd[2];
+    if (pipe(pipefd) == -1) {
+        perror("pipe failed");
+        return;
+    }
+
+    pid_t pid = fork();
+    if (pid == 0) {
+        // Child process
+        close(pipefd[0]);
+        dup2(pipefd[1], STDOUT_FILENO);
+        dup2(pipefd[1], STDERR_FILENO);
+        close(pipefd[1]);
+
+        // Check for pipes and redirections
+        int pipeFound = 0, redirectFound = 0;
+        int inputRedirectFound = 0, outputRedirectFound = 0, errorRedirectFound = 0;
+
+        for (int j = 0; j < argCount; j++) {
+            if (strcmp(parsedCommand[j], "|") == 0) pipeFound = 1;
+            if (strcmp(parsedCommand[j], "<") == 0) {
+                redirectFound = 1;
+                inputRedirectFound = 1;
+            }
+            if (strcmp(parsedCommand[j], ">") == 0) {
+                redirectFound = 1;
+                outputRedirectFound = 1;
+            }
+            if (strcmp(parsedCommand[j], "2>") == 0 || strcmp(parsedCommand[j], "2>&1") == 0) {
+                redirectFound = 1;
+                errorRedirectFound = 1;
+            }
+        }
+
+        // Execute command based on type
+        if (pipeFound && redirectFound) {
+            handlePipeRedirect(parsedCommand);
+        } else if (pipeFound) {
+            int pipeCount = 0;
+            for (int j = 0; j < argCount; j++) {
+                if (strcmp(parsedCommand[j], "|") == 0) pipeCount++;
+            }
+            if (pipeCount > 1) {
+                handleMultiplePipes(parsedCommand);
+            } else {
+                handlePipes(parsedCommand);
+            }
+        } else if (redirectFound) {
+            if ((inputRedirectFound && outputRedirectFound) ||
+                (inputRedirectFound && errorRedirectFound) ||
+                (outputRedirectFound && errorRedirectFound)) {
+                handleCombinedRedirect(parsedCommand);
+            } else if (inputRedirectFound) {
+                inputRedirect(parsedCommand);
+            } else {
+                handleRedirect(parsedCommand);
+            }
+        } else {
+            // For simple commands, use execvp directly
+            execvp(parsedCommand[0], parsedCommand);
+            // If execvp fails, print error and exit
+            char error_msg[BUFFER_SIZE];
+            if (argCount > 1) {
+                snprintf(error_msg, sizeof(error_msg), "%s: %s: No such file or directory\n", 
+                        parsedCommand[0], parsedCommand[1]);
+            } else {
+                snprintf(error_msg, sizeof(error_msg), "%s: missing operand\n", parsedCommand[0]);
+            }
+            write(STDERR_FILENO, error_msg, strlen(error_msg));
+            exit(1);
+        }
+        exit(0);
+    } else if (pid > 0) {
+        // Parent process
+        close(pipefd[1]);
+
+        char buffer[BUFFER_SIZE];
+        ssize_t bytes;
+        size_t total_bytes = 0;
+        
+        // Read and send output
+        while ((bytes = read(pipefd[0], buffer, sizeof(buffer) - 1)) > 0) {
+            buffer[bytes] = '\0';
+            send(task->socket_fd, buffer, bytes, 0);
+            total_bytes += bytes;
+        }
+
+        close(pipefd[0]);
+        
+        // Wait for child process
+        int status;
+        waitpid(pid, &status, 0);
+
+        // Only send error message if no output was received
+        if (total_bytes == 0 && WIFEXITED(status) && WEXITSTATUS(status) != 0) {
+            // Let the error from the child process handle it
+            // Don't send additional error message here
+        }
+    }
 }
 
 
