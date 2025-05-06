@@ -228,6 +228,26 @@ void execute_shell_command(Task* task) {
         return;
     }
 
+    // Check for pipes and redirections first
+    int pipeFound = 0, redirectFound = 0;
+    int inputRedirectFound = 0, outputRedirectFound = 0, errorRedirectFound = 0;
+
+    for (int j = 0; j < argCount; j++) {
+        if (strcmp(parsedCommand[j], "|") == 0) pipeFound = 1;
+        if (strcmp(parsedCommand[j], "<") == 0) {
+            redirectFound = 1;
+            inputRedirectFound = 1;
+        }
+        if (strcmp(parsedCommand[j], ">") == 0) {
+            redirectFound = 1;
+            outputRedirectFound = 1;
+        }
+        if (strcmp(parsedCommand[j], "2>") == 0 || strcmp(parsedCommand[j], "2>&1") == 0) {
+            redirectFound = 1;
+            errorRedirectFound = 1;
+        }
+    }
+
     int pipefd[2];
     if (pipe(pipefd) == -1) {
         perror("pipe failed");
@@ -241,26 +261,6 @@ void execute_shell_command(Task* task) {
         dup2(pipefd[1], STDOUT_FILENO);
         dup2(pipefd[1], STDERR_FILENO);
         close(pipefd[1]);
-
-        // Check for pipes and redirections
-        int pipeFound = 0, redirectFound = 0;
-        int inputRedirectFound = 0, outputRedirectFound = 0, errorRedirectFound = 0;
-
-        for (int j = 0; j < argCount; j++) {
-            if (strcmp(parsedCommand[j], "|") == 0) pipeFound = 1;
-            if (strcmp(parsedCommand[j], "<") == 0) {
-                redirectFound = 1;
-                inputRedirectFound = 1;
-            }
-            if (strcmp(parsedCommand[j], ">") == 0) {
-                redirectFound = 1;
-                outputRedirectFound = 1;
-            }
-            if (strcmp(parsedCommand[j], "2>") == 0 || strcmp(parsedCommand[j], "2>&1") == 0) {
-                redirectFound = 1;
-                errorRedirectFound = 1;
-            }
-        }
 
         // Execute command based on type
         if (pipeFound && redirectFound) {
@@ -286,7 +286,7 @@ void execute_shell_command(Task* task) {
                 handleRedirect(parsedCommand);
             }
         } else {
-            // For simple commands, use execvp directly
+            // For simple commands without redirection, use execvp directly
             execvp(parsedCommand[0], parsedCommand);
             // If execvp fails, print error and exit
             char error_msg[BUFFER_SIZE];
