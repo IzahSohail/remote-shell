@@ -69,17 +69,19 @@ int main()
         memset(serverResponse, 0, sizeof(serverResponse));
         ssize_t bytesReceived;
 
-        while ((bytesReceived = recv(sock, serverResponse, sizeof(serverResponse) - 1, 0)) > 0)
-        {
-            serverResponse[bytesReceived] = '\0'; // Ensure null termination
-            printf("%s", serverResponse);         // Print received chunk immediately
+        while ((bytesReceived = recv(sock, serverResponse, sizeof(serverResponse) - 1, 0)) > 0) {
+        serverResponse[bytesReceived] = '\0';
 
-            // If we received fewer bytes than buffer size, that means there's no more data
-            if (bytesReceived < sizeof(serverResponse) - 1)
-            {
-                break;
-            }
+        // Look for task completion marker
+        if (strstr(serverResponse, "__TASK_DONE__")) {
+            serverResponse[strstr(serverResponse, "__TASK_DONE__") - serverResponse] = '\0';
+            printf("%s", serverResponse);
+            break;
         }
+
+        printf("%s", serverResponse);
+    }
+
 
         // Properly handle server disconnection
         if (bytesReceived == -1)

@@ -9,6 +9,7 @@
 #include <sys/wait.h>
 #include "executor.h"
 #include "parser.h"
+#include "scheduler.h"
 
 // for phase 3
 #include <pthread.h>
@@ -20,12 +21,10 @@
 int client_counter = 0;
 pthread_mutex_t counter_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-void *handle_client(void *arg)
-{
+void *handle_client(void *arg) {
     int client_socket = *((int *)arg);
-    free(arg); // clean up dynamic memory
+    free(arg);
 
-    // get the ip and port of the client to log these
     struct sockaddr_in client_addr;
     socklen_t addr_len = sizeof(client_addr);
     getpeername(client_socket, (struct sockaddr *)&client_addr, &addr_len);
@@ -35,8 +34,6 @@ void *handle_client(void *arg)
     int client_port = ntohs(client_addr.sin_port);
 
     int client_number;
-
-    // assign a thread number to the client connecting
     pthread_mutex_lock(&counter_mutex);
     client_counter++;
     client_number = client_counter;
@@ -49,152 +46,53 @@ void *handle_client(void *arg)
     char *parsedCommand[50];
     int argCount;
 
-    while (1)
-    {
+    while (1) {
         memset(clientCommand, 0, sizeof(clientCommand));
         int bytesReceived = recv(client_socket, clientCommand, sizeof(clientCommand), 0);
 
-        if (bytesReceived <= 0)
-        {
+        if (bytesReceived <= 0) {
             printf("[INFO] Client #%d - %s:%d disconnected.\n", client_number, client_ip, client_port);
+            remove_tasks_by_client(client_number);
             break;
         }
 
         printf("[RECEIVED] [Client #%d - %s:%d] Received command: \"%s\"\n",
                client_number, client_ip, client_port, clientCommand);
 
-        if (strcmp(clientCommand, "exit") == 0)
-        {
-            printf("[INFO] [Client #%d - %s:%d] Client requested disconnect. Closing connection.\n",
+        if (strcmp(clientCommand, "exit") == 0) {
+            printf("[INFO] [Client #%d - %s:%d] Client requested disconnect.\n",
                    client_number, client_ip, client_port);
+            remove_tasks_by_client(client_number);
             break;
         }
 
         parseInput(clientCommand, parsedCommand, &argCount);
-        if (parsedCommand[0] == NULL)
-            continue;
+        if (parsedCommand[0] == NULL) continue;
 
-        int pipeFound = 0, redirectFound = 0;
-        int inputRedirectFound = 0, outputRedirectFound = 0, errorRedirectFound = 0;
-
-        for (int j = 0; j < argCount; j++)
-        {
-            if (strcmp(parsedCommand[j], "|") == 0)
-                pipeFound = 1;
-            if (strcmp(parsedCommand[j], "<") == 0)
-            {
-                redirectFound = 1;
-                inputRedirectFound = 1;
-            }
-            if (strcmp(parsedCommand[j], ">") == 0)
-            {
-                redirectFound = 1;
-                outputRedirectFound = 1;
-            }
-            if (strcmp(parsedCommand[j], "2>") == 0 || strcmp(parsedCommand[j], "2>&1") == 0)
-            {
-                redirectFound = 1;
-                errorRedirectFound = 1;
+        // Check if it's a demo task like "./demo 5"
+        if ((strcmp(parsedCommand[0], "./demo") == 0 || strcmp(parsedCommand[0], "demo") == 0) && argCount == 2) {
+            int burst_time = atoi(parsedCommand[1]);
+            if (burst_time > 0) {
+                add_task_with_socket(clientCommand, client_number, burst_time, 0, client_socket);  // 0 = non-shell
+                continue;
+            } else {
+                char *err = "Usage: ./demo <burst_time>\n";
+                send(client_socket, err, strlen(err), 0);
+                continue;
             }
         }
 
-        int pipefd[2];
-        if (pipe(pipefd) == -1)
-        {
-            perror("[ERROR] Pipe creation failed");
-            continue;
-        }
+        // Otherwise it's a shell command
+        add_task_with_socket(clientCommand, client_number, -1, 1, client_socket);  // 1 = shell command
 
-        printf("[EXECUTING] [Client #%d - %s:%d] Executing command: \"%s\"\n",
+        printf("[EXECUTING] [Client #%d - %s:%d] Scheduled command: \"%s\"\n",
                client_number, client_ip, client_port, clientCommand);
-
-        // for all the commands
-        pid_t pid = fork();
-        if (pid == 0)
-        {
-            close(pipefd[0]);
-            dup2(pipefd[1], STDOUT_FILENO);
-            dup2(pipefd[1], STDERR_FILENO);
-            close(pipefd[1]);
-
-            if (pipeFound && redirectFound)
-            {
-                handlePipeRedirect(parsedCommand);
-            }
-            else if (pipeFound)
-            {
-                int pipeCount = 0;
-                for (int j = 0; j < argCount; j++)
-                {
-                    if (strcmp(parsedCommand[j], "|") == 0)
-                        pipeCount++;
-                }
-                if (pipeCount > 1)
-                {
-                    handleMultiplePipes(parsedCommand);
-                }
-                else
-                {
-                    handlePipes(parsedCommand);
-                }
-            }
-            else if (redirectFound)
-            {
-                if ((inputRedirectFound && outputRedirectFound) ||
-                    (inputRedirectFound && errorRedirectFound) ||
-                    (outputRedirectFound && errorRedirectFound))
-                {
-                    handleCombinedRedirect(parsedCommand);
-                }
-                else if (inputRedirectFound)
-                {
-                    inputRedirect(parsedCommand);
-                }
-                else
-                {
-                    handleRedirect(parsedCommand);
-                }
-            }
-            else
-            {
-                noArgCommand(parsedCommand);
-            }
-
-            exit(0);
-        }
-        else
-        {
-            close(pipefd[1]);
-
-            char response[BUFFER_SIZE];
-            memset(response, 0, BUFFER_SIZE);
-            read(pipefd[0], response, BUFFER_SIZE - 1);
-            close(pipefd[0]);
-
-            int status;
-            waitpid(pid, &status, 0);
-
-            if (strlen(response) == 0)
-            {
-                strcpy(response, "\n");
-            }
-            else if (WIFEXITED(status) && WEXITSTATUS(status) != 0)
-            {
-                printf("[ERROR] [Client #%d - %s:%d] Command not found: \"%s\"\n",
-                       client_number, client_ip, client_port, clientCommand);
-                strcpy(response, "Command not found.\n");
-            }
-
-            printf("[OUTPUT] [Client #%d - %s:%d] Sending output to client:\n%s",
-                   client_number, client_ip, client_port, response);
-
-            send(client_socket, response, strlen(response), 0);
-        }
     }
 
     close(client_socket);
     pthread_exit(NULL);
 }
+
 
 int main()
 {
@@ -238,6 +136,8 @@ int main()
     }
 
     printf("[INFO] Server started, waiting for client connections...\n");
+
+    init_scheduler();
 
     while (1)
     {
