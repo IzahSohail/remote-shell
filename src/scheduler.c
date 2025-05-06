@@ -257,10 +257,13 @@ void execute_shell_command(Task* task) {
     pid_t pid = fork();
     if (pid == 0) {
         // Child process
-        close(pipefd[0]);
-        dup2(pipefd[1], STDOUT_FILENO);
-        dup2(pipefd[1], STDERR_FILENO);
-        close(pipefd[1]);
+        if (!redirectFound) {
+            // Only redirect to pipe if there's no file redirection
+            close(pipefd[0]);
+            dup2(pipefd[1], STDOUT_FILENO);
+            dup2(pipefd[1], STDERR_FILENO);
+            close(pipefd[1]);
+        }
 
         // Execute command based on type
         if (pipeFound && redirectFound) {
@@ -304,27 +307,25 @@ void execute_shell_command(Task* task) {
         // Parent process
         close(pipefd[1]);
 
-        char buffer[BUFFER_SIZE];
-        ssize_t bytes;
-        size_t total_bytes = 0;
-        
-        // Read and send output
-        while ((bytes = read(pipefd[0], buffer, sizeof(buffer) - 1)) > 0) {
-            buffer[bytes] = '\0';
-            send(task->socket_fd, buffer, bytes, 0);
-            total_bytes += bytes;
+        if (!redirectFound) {
+            // Only read from pipe if there's no file redirection
+            char buffer[BUFFER_SIZE];
+            ssize_t bytes;
+            
+            while ((bytes = read(pipefd[0], buffer, sizeof(buffer) - 1)) > 0) {
+                buffer[bytes] = '\0';
+                send(task->socket_fd, buffer, bytes, 0);
+            }
+            close(pipefd[0]);
         }
-
-        close(pipefd[0]);
         
         // Wait for child process
         int status;
         waitpid(pid, &status, 0);
 
-        // Only send error message if no output was received
-        if (total_bytes == 0 && WIFEXITED(status) && WEXITSTATUS(status) != 0) {
-            // Let the error from the child process handle it
-            // Don't send additional error message here
+        // For redirected commands, send a success message
+        if (redirectFound && WIFEXITED(status) && WEXITSTATUS(status) == 0) {
+            send(task->socket_fd, "", 0, 0);
         }
     }
 }
