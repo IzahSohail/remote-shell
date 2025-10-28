@@ -1,8 +1,0 @@
-{
-    "files.associations": {
-        "errno.h": "c",
-        "parser.h": "c",
-        "executor.h": "c",
-        "inet.h": "c"
-    }
-}
