@@ -1,0 +1,31 @@
+# Build artifacts
+obj/
+*.o
+*.out
+*.a
+*.so
+*.dylib
+myshell.dSYM/
+
+# Binaries
+server
+myshell
+demo
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+
+# Editor/IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Generated files
+*.tmp
+*.bak
+
+
